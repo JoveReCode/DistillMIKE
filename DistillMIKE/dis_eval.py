@@ -22,20 +22,12 @@ def parse_args():
 device = 'cuda'
 
 
-model_name = 'EleutherAI/gpt-j-6B'
-# model_name = "PEFT model"
+# model_name = 'EleutherAI/gpt-j-6B'
+model_name = "PEFT model"
 # dataset_name = './multi_counterfact.json'
 dataset_name = './multi_counterfact_ori.json'
 test_num = 10000
 overflow = []
-
-
-
-with open('corpus_idx_10k.txt', 'r') as fIn:
-    lines = fIn.readlines()
-    lines = [line[:-1] for line in lines]
-    
-    corpus_idx = [[int(idx) for idx in line.split()] for line in lines]
 
 
 
@@ -69,16 +61,17 @@ if __name__ == '__main__':
 
     print("loading model ...")
     print(model_name)
-    # model = AutoPeftModelForCausalLM.from_pretrained("distill_models_neox_MIKE/10",load_in_8bit=True,device_map="cuda:0")
-    # model = AutoPeftModelForCausalLM.from_pretrained("distill_modelsIKEbaseE/9", device_map="cuda:0")
-    model = GPTJForCausalLM.from_pretrained(model_name).to(device)
+    # load distilled model (student)
+    # model = AutoPeftModelForCausalLM.from_pretrained("distill_models_neox_MIKE/10",load_in_8bit=True,device_map="cuda:0") 
+    model = AutoPeftModelForCausalLM.from_pretrained("distill_modelsIKEbaseE/checkpoint_10", device_map="cuda:0")
+    # model = GPTJForCausalLM.from_pretrained(model_name).to(device)
     print("model loaded.")
 
     model.eval()
 
     print("loading tokenizer ...")
     tokenizer = GPT2TokenizerFast.from_pretrained('EleutherAI/gpt-j-6B')
-    # tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-neox-20b')
+    tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-neox-20b')
     print("tokenizer loaded.")
 
 
