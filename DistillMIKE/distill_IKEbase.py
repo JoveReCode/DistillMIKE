@@ -12,8 +12,7 @@ import os
 import os.path as osp
 from peft import LoraConfig, TaskType, get_peft_model
 
-# model_name = 'EleutherAI/gpt-j-6B'
-model_name = "/raid2/qiaosb/memit/models/GPT-J_memit_10000_0"
+model_name = 'EleutherAI/gpt-j-6B'
 dataset_name = './multi_counterfact_ori.json'
 test_num = 10000
 overflow = []
@@ -31,9 +30,6 @@ def parse_args():
     return args
 
 def construct_icl_examples(idx, demos):
-
-    # order = [1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1,  1, 1, 1, 1]
-    # order = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     order = [1, 1, 1, 1, 1, 1, 1, 1,  1, 1, 1, 1]
     random.shuffle(order)
     icl_examples = []
@@ -67,7 +63,6 @@ def step_eval(teacher, student, tokenizer, icl_examples, target, x, tag):
     prompt_encodings = tokenizer(' ' + f'{x} {target}', return_tensors='pt')
     student_ids = prompt_encodings['input_ids'].to(student.device)
     if tag == 'ns':    # GPT-J teacher for NS
-        # print("ns")
         teacher_ids = prompt_encodings['input_ids'].to(teacher.device)
     else:       # MEMIT teacher for ES,PS
         if encodings['input_ids'].size(1) < 2048:
@@ -89,18 +84,8 @@ def step_eval(teacher, student, tokenizer, icl_examples, target, x, tag):
     student_outputs = student(student_ids, labels = student_target_ids)
     student_logits = student_outputs.logits
     student_loss = student_outputs.loss
-    # print(teacher_logits.shape)
-    # print(student_logits.shape)
-    # s_len = student_logits.size(1)
-    # t_len = teacher_logits.size(1)
-    # if s_len < t_len:
-    #     teacher_logits = teacher_logits[:,-s_len:,:]
-    # else:
-    #     student_logits = student_logits[:,-t_len:,:]
     teacher_logits = teacher_logits[:, -3:, :]
     student_logits = student_logits[:, -3:, :]
-    # print(teacher_trunc_logits.shape)
-    # print(student_loss)
 
     return teacher_logits, student_logits, student_loss
 
@@ -151,17 +136,6 @@ def distill(lines,n_facts, ns_facts, teacher,  student, optimizer, T, soft_weigh
         example_idx += 1
 
         for target in tragets:
-            # es_flag = 0
-            # for sub in S:
-            #     if (sub + ' ' in prompt) or (sub + '\'' in prompt) or (sub + ',' in prompt) or (sub + '.' in prompt):
-            #         t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, icl_examples, target,
-            #                                                f'Prompt: {prompt}', 'es')
-            #         es_flag = 1
-            #         break
-            # if es_flag == 0:
-            #     t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, [], target,
-            #                                            f'{prompt}', 'es')
-
             t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, icl_examples, target, f'Prompt: {prompt}', 'es')
             soft_target = torch.nn.functional.log_softmax( t_logits / T, dim=-1 )
             soft_prob = torch.nn.functional.log_softmax( s_logits / T, dim=-1)
@@ -209,7 +183,6 @@ def distill(lines,n_facts, ns_facts, teacher,  student, optimizer, T, soft_weigh
                 ps_loss += loss.item()
             losses[1] = ps_loss / ((i+1)*2*2)
 
-            # neighbors = line['neighborhood_prompts'][:2]
             neighbors = line['neighborhood_prompts']
             ns_count = 0
             for ni,neighbor in enumerate(neighbors):
@@ -225,19 +198,6 @@ def distill(lines,n_facts, ns_facts, teacher,  student, optimizer, T, soft_weigh
                     target_ns = lines[ns_ret_facts[ni]]['requested_rewrite']['target_new']['str']
                     icl_ns.append(f'New Fact: {prompt_ns} {target_ns}\nPrompt: {prompt_ns} {target_ns}\n\n')
                     t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, icl_ns, target,f'Prompt: {neighbor}', 'is')
-                # ns_flag = 0
-                # for sub in S:
-                #     if (sub + ' ' in neighbor) or (sub + '\'' in neighbor) or (sub + ',' in neighbor) or (
-                #             sub + '.' in neighbor):
-                #         t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, icl_examples, target,
-                #                                                f'Prompt: {neighbor}', 'is')
-                #         ns_flag = 1
-                #         break
-                # if ns_flag == 0:
-                #     ns_count += 1
-                #     t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, [], target,
-                #                                            f'{neighbor}', 'ns')
-
 
                 # t_logits, s_logits, s_loss = step_eval(teacher2, student, tokenizer, icl_examples, target, f'Prompt: {neighbor}', 'ns')
                 soft_target = torch.nn.functional.log_softmax(t_logits / T, dim=-1)
@@ -284,9 +244,8 @@ if __name__ == '__main__':
     # print("GPT-J teacher model loaded.")
 
     print("loading student model ...")
-    # student = GPTJForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-J_memit_10000_0").to('cuda:1')
-    student = GPTJForCausalLM.from_pretrained("./GPT-J_memit_10000_0").to('cuda:1')
-    # student = GPTJForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-8000_test_8000_0").to('cuda:1')
+    student = GPTJForCausalLM.from_pretrained("/home/user/memit/models/GPT-J_memit_10000").to('cuda:1')
+
 
     print("studnet model loaded.")
     print("set LoRA ...")
@@ -326,11 +285,11 @@ if __name__ == '__main__':
 
     for epoch in range(epoches):
         e_loss = distill(lines,n_facts,ns_facts, teacher, student, optimizer, T=T, soft_weight=soft_weight, label_weight=label_weight)
-        if not osp.exists(f"./distill_modelsIKEbase8K/{epoch}"):
-            os.makedirs(f"./distill_modelsIKEbase8K/{epoch}")
-        student.save_pretrained(f"distill_modelsIKEbase8K/{epoch}")
+        if not osp.exists(f"./distill_models/{epoch}"):
+            os.makedirs(f"./distill_models/{epoch}")
+        student.save_pretrained(f"distill_models/{epoch}")
         print(f"Epoche Loss: {e_loss}\n")
-        with open('Epoche_lossIKEbase8K.txt', mode='a') as src:
+        with open('Epoche_lossIKEbase.txt', mode='a') as src:
             src.write(f'epoch:{epoch} \t es_loss:{e_loss[0]} \t ps_loss:{e_loss[1]} \t ns_loss:{e_loss[2]}\n')
 
 
