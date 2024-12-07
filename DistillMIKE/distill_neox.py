@@ -15,7 +15,7 @@ from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_int8_tr
 scaler = torch.cuda.amp.GradScaler()
 
 # model_name = 'EleutherAI/gpt-j-6B'
-model_name = "memit/models/GPT-NeoX_10000_10000_0"
+model_name = "/raid2/qiaosb/memit/models/GPT-NeoX_10000_10000_0"
 dataset_name = './multi_counterfact_ori.json'
 test_num = 10000
 overflow = []
@@ -96,15 +96,26 @@ def step_eval(teacher, student, tokenizer, icl_examples, target, x, tag):
         # print(student_outputs.logits)
         student_logits = student_outputs.logits
         student_loss = student_outputs.loss
+    # print(teacher_logits.shape)
+    # print(student_logits.shape)
+    # s_len = student_logits.size(1)
+    # t_len = teacher_logits.size(1)
+    # if s_len < t_len:
+    #     teacher_logits = teacher_logits[:,-s_len:,:]
+    # else:
+    #     student_logits = student_logits[:,-t_len:,:]
     teacher_logits = teacher_logits[:, -3:, :]
     student_logits = student_logits[:, -3:, :]
-
+    # print(teacher_trunc_logits.shape)
+    # print(teacher_logits)
+    # print(student_logits)
+    # print(student_loss)
 
     return teacher_logits, student_logits, student_loss
 
 
 
-def distill(lines, teacher1, teacher2, student, optimizer, T, soft_weight, label_weight):
+def distill(lines,n_facts, ns_facts, teacher1, teacher2, student, optimizer, T, soft_weight, label_weight):
     losses = [0.0, 0.0, 0.0]
     es_loss = 0.0
     ps_loss = 0.0
@@ -119,6 +130,8 @@ def distill(lines, teacher1, teacher2, student, optimizer, T, soft_weight, label
         S.append(subject)
 
     for i, line in enumerate(lines):
+        ret_facts = n_facts[str(i)]
+        ns_ret_facts = ns_facts[str(i)]
         if i % 10 == 0:
             print(f'{i} \t es_loss:{losses[0]} \t ps_loss:{losses[1]} \t ns_loss:{losses[2]}')
 
@@ -132,6 +145,16 @@ def distill(lines, teacher1, teacher2, student, optimizer, T, soft_weight, label
 
         # icl_examples = optimized_icl_examples(example_idx, demos)
         icl_examples = construct_icl_examples(example_idx, demos)
+        new_fact_p1 = lines[ret_facts[0]]
+        new_fact_p2 = lines[ret_facts[1]]
+        prompt_ps = [new_fact_p1['requested_rewrite']['prompt'], new_fact_p2['requested_rewrite']['prompt']]
+        target_ps = [new_fact_p1['requested_rewrite']['target_new']['str'], new_fact_p2['requested_rewrite']['target_new']['str']]
+        temp_icl_examples = icl_examples
+        icl_p1 = icl_examples
+        icl_p1.append(f'New Fact: {prompt_ps[0]} {target_ps[0]}\nPrompt: {prompt_ps[0]} {target_ps[0]}\n\n')
+        icl_p2 = icl_examples
+        icl_p2.append(f'New Fact: {prompt_ps[1]} {target_ps[1]}\nPrompt: {prompt_ps[1]} {target_ps[1]}\n\n')
+        icl_ps = [icl_p1,icl_p2]
 
         icl_examples.append(f'New Fact: {prompt} {target_new}\nPrompt: {prompt} {target_new}\n\n')  # prompt
         example_idx += 1
@@ -164,12 +187,12 @@ def distill(lines, teacher1, teacher2, student, optimizer, T, soft_weight, label
 
 
             paraphrases = line['paraphrase_prompts']
-            for paraphrase in paraphrases:
+            for pi,paraphrase in enumerate(paraphrases):
                 ps_flag = 0
                 for sub in S:
                     if (sub + ' ' in paraphrase) or (sub + '\'' in paraphrase) or (sub + ',' in paraphrase) or (
                             sub + '.' in paraphrase) or (sub + '?' in paraphrase) or (sub + 's' in paraphrase):
-                        t_logits, s_logits, s_loss = step_eval(teacher1, student, tokenizer, icl_examples, target,
+                        t_logits, s_logits, s_loss = step_eval(teacher1, student, tokenizer, icl_ps[pi], target,
                                                                f'Prompt: {paraphrase}', 'ps')
                         ps_flag = 1
                         break
@@ -197,20 +220,35 @@ def distill(lines, teacher1, teacher2, student, optimizer, T, soft_weight, label
 
             neighbors = line['neighborhood_prompts'][:2]
             ns_count = 0
-            for neighbor in neighbors:
-                if ns_count >= 2:       # only need to distill 2 NS samples
+            for ni,neighbor in enumerate(neighbors):
+                if ns_count >= 2:       # only distill 2 NS
                     break
-                ns_flag = 0
-                for sub in S:
-                    if (sub + ' ' in neighbor) or (sub + '\'' in neighbor) or (sub + ',' in neighbor) or (
-                            sub + '.' in neighbor) or (sub + '?' in neighbor) or (sub + 's' in neighbor):
-                        t_logits, s_logits, s_loss = step_eval(teacher1, student, tokenizer, icl_examples, target,
-                                                               f'Prompt: {neighbor}', 'is')
-                        ns_flag = 1
-                        break
-                if ns_flag == 0:
+
+                if ns_ret_facts[ni] == -1:
                     ns_count += 1
-                    t_logits, s_logits, s_loss = step_eval(teacher2, student, tokenizer, [], target, f'{neighbor}', 'ns')
+                    t_logits, s_logits, s_loss = step_eval(teacher1, student, tokenizer, [], target,
+                                                               f'{neighbor}', 'ns')
+                else:
+                    icl_ns = temp_icl_examples
+                    prompt_ns = lines[ns_ret_facts[ni]]['requested_rewrite']['prompt']
+                    target_ns = lines[ns_ret_facts[ni]]['requested_rewrite']['target_new']['str']
+                    icl_ns.append(f'New Fact: {prompt_ns} {target_ns}\nPrompt: {prompt_ns} {target_ns}\n\n')
+                    t_logits, s_logits, s_loss = step_eval(teacher2, student, tokenizer, icl_ns, target,f'Prompt: {neighbor}', 'is')
+
+                # ns_flag = 0
+                # for sub in S:
+                #     if (sub + ' ' in neighbor) or (sub + '\'' in neighbor) or (sub + ',' in neighbor) or (
+                #             sub + '.' in neighbor) or (sub + '?' in neighbor) or (sub + 's' in neighbor):
+                #         t_logits, s_logits, s_loss = step_eval(teacher1, student, tokenizer, icl_examples, target,
+                #                                                f'Prompt: {neighbor}', 'is')     #  maybe should not distill here
+                #         ns_flag = 1
+                #         break
+                # if ns_flag == 0:
+                #     ns_count += 1
+                #     t_logits, s_logits, s_loss = step_eval(teacher2, student, tokenizer, [], target, f'{neighbor}', 'ns')
+
+
+
                 # t_logits, s_logits, s_loss = step_eval(teacher2, student, tokenizer, icl_examples, target, f'Prompt: {neighbor}', 'ns')
                 soft_target = torch.nn.functional.log_softmax(t_logits / T, dim=-1)
                 soft_prob = torch.nn.functional.log_softmax(s_logits / T, dim=-1)
@@ -249,10 +287,13 @@ if __name__ == '__main__':
 
 
     print("loading MEMIT teacher model ...")
-    # teacher1 = GPTJForCausalLM.from_pretrained("memit/models/GPT-NeoX_10000_10000_0")
-    # teacher1 = AutoModelForCausalLM.from_pretrained("memit/models/GPT-NeoX_10000_10000_0",
+    # teacher1 = GPTJForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0")
+    # teacher1 = AutoModelForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0",
+    #                                              torch_dtype=torch.float16, device_map="cuda:0")
+    # teacher1 = AutoModelForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0",
     #                                              load_in_8bit=True, device_map="cuda:0")
     teacher1 = AutoModelForCausalLM.from_pretrained('EleutherAI/gpt-neox-20b', load_in_8bit=True, device_map="cuda:0")
+
 
     # teacher = GPT2LMHeadModel.from_pretrained("gpt2").to('cuda:0')
     # teacher = GPTJForCausalLM.from_pretrained(model_name).to('cuda')
@@ -264,9 +305,9 @@ if __name__ == '__main__':
     print("GPT-J teacher model loaded.")
 
     print("loading student model ...")
-    # student = AutoModelForCausalLM.from_pretrained("memit/models/GPT-NeoX_10000_10000_0",
+    # student = AutoModelForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0",
     #                                              torch_dtype=torch.float16, device_map="cuda:2")
-    student = AutoModelForCausalLM.from_pretrained("memit/models/GPT-NeoX_10000_10000_0",
+    student = AutoModelForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0",
                                                    load_in_8bit=True, device_map="cuda:2")
 
     student = prepare_model_for_int8_training(student)
@@ -276,6 +317,8 @@ if __name__ == '__main__':
         if param.ndim == 1:
             # cast the small parameters (e.g. layernorm) to fp32 for stability
             param.data = param.data.to(torch.float32)
+
+
 
     # class CastOutputToFloat(torch.nn.Sequential):
     #     def forward(self, x): return super().forward(x).to(torch.float32)
@@ -307,13 +350,19 @@ if __name__ == '__main__':
     lines = lines[:test_num]
     print("lines:", len(lines))
 
+    with open('./retrieved_facts.json', 'r') as f:     # load retrieved new facts for ps
+        n_facts = json.load(f)
+    with open('./ns_retrieved_facts.json', 'r') as f:     # load retrieved new facts for ns
+        ns_facts = json.load(f)
+
+
     epoches = 20
     T = 1.0
     soft_weight = 1e4
     label_weight = 0.5
 
     for epoch in range(epoches):
-        e_loss = distill(lines, teacher1, teacher2, student, optimizer, T=T, soft_weight=soft_weight, label_weight=label_weight)
+        e_loss = distill(lines,n_facts, ns_facts, teacher1, teacher2, student, optimizer, T=T, soft_weight=soft_weight, label_weight=label_weight)
         if not osp.exists(f"./distill_models_neox_MIKE/{epoch}"):
             os.makedirs(f"./distill_models_neox_MIKE/{epoch}")
         student.save_pretrained(f"distill_models_neox_MIKE/{epoch}")

@@ -106,7 +106,7 @@ def step_eval(teacher, student, tokenizer, icl_examples, target, x, tag):
 
 
 
-def distill(lines, teacher,  student, optimizer, T, soft_weight, label_weight):
+def distill(lines,n_facts, ns_facts, teacher,  student, optimizer, T, soft_weight, label_weight):
     losses = [0.0, 0.0, 0.0]
     es_loss = 0.0
     ps_loss = 0.0
@@ -120,6 +120,8 @@ def distill(lines, teacher,  student, optimizer, T, soft_weight, label_weight):
         S.append(subject)
 
     for i, line in enumerate(lines):
+        ret_facts = n_facts[str(i)]
+        ns_ret_facts = ns_facts[str(i)]
         if i % 10 == 0:
             print(f'{i} \t es_loss:{losses[0]} \t ps_loss:{losses[1]} \t ns_loss:{losses[2]}')
 
@@ -133,6 +135,17 @@ def distill(lines, teacher,  student, optimizer, T, soft_weight, label_weight):
 
         # icl_examples = optimized_icl_examples(example_idx, demos)
         icl_examples = construct_icl_examples(example_idx, demos)
+        new_fact_p1 = lines[ret_facts[0]]
+        new_fact_p2 = lines[ret_facts[1]]
+        prompt_ps = [new_fact_p1['requested_rewrite']['prompt'], new_fact_p2['requested_rewrite']['prompt']]
+        target_ps = [new_fact_p1['requested_rewrite']['target_new']['str'], new_fact_p2['requested_rewrite']['target_new']['str']]
+        temp_icl_examples = icl_examples
+        icl_p1 = icl_examples
+        icl_p1.append(f'New Fact: {prompt_ps[0]} {target_ps[0]}\nPrompt: {prompt_ps[0]} {target_ps[0]}\n\n')
+        icl_p2 = icl_examples
+        icl_p2.append(f'New Fact: {prompt_ps[1]} {target_ps[1]}\nPrompt: {prompt_ps[1]} {target_ps[1]}\n\n')
+        icl_ps = [icl_p1,icl_p2]
+
 
         icl_examples.append(f'New Fact: {prompt} {target_new}\nPrompt: {prompt} {target_new}\n\n')  # prompt
         example_idx += 1
@@ -168,18 +181,18 @@ def distill(lines, teacher,  student, optimizer, T, soft_weight, label_weight):
 
 
             paraphrases = line['paraphrase_prompts']
-            for paraphrase in paraphrases:
+            for pi,paraphrase in enumerate(paraphrases):
                 ps_flag = 0
                 for sub in S:
                     if (sub + ' ' in paraphrase) or (sub + '\'' in paraphrase) or (sub + ',' in paraphrase) or (
                             sub + '.' in paraphrase):
-                        t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, icl_examples, target,
+                        t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, icl_ps[pi], target,
                                                                f'Prompt: {paraphrase}', 'ps')
+
                         ps_flag = 1
                         break
                 if ps_flag == 0:
-                    t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, [], target,
-                                                           f'{paraphrase}', 'ns')
+                    t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, [], target, f'{paraphrase}', 'ns')
                 # t_logits, s_logits, s_loss = step_eval(teacher1, student, tokenizer, icl_examples, target, f'Prompt: {paraphrase}', 'ps')
                 soft_target = torch.nn.functional.log_softmax(t_logits / T, dim=-1)
                 soft_prob = torch.nn.functional.log_softmax(s_logits / T, dim=-1)
@@ -199,21 +212,33 @@ def distill(lines, teacher,  student, optimizer, T, soft_weight, label_weight):
             # neighbors = line['neighborhood_prompts'][:2]
             neighbors = line['neighborhood_prompts']
             ns_count = 0
-            for neighbor in neighbors:
-                if ns_count >= 2:       # only distill 2 NS
+            for ni,neighbor in enumerate(neighbors):
+                if ns_count >= 2:
                     break
-                ns_flag = 0
-                for sub in S:
-                    if (sub + ' ' in neighbor) or (sub + '\'' in neighbor) or (sub + ',' in neighbor) or (
-                            sub + '.' in neighbor):
-                        t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, icl_examples, target,
-                                                               f'Prompt: {neighbor}', 'is')     #  maybe should not distill here
-                        ns_flag = 1
-                        break
-                if ns_flag == 0:
+                if ns_ret_facts[ni] == -1:
                     ns_count += 1
                     t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, [], target,
-                                                           f'{neighbor}', 'ns')
+                                                               f'{neighbor}', 'ns')
+                else:
+                    icl_ns = temp_icl_examples
+                    prompt_ns = lines[ns_ret_facts[ni]]['requested_rewrite']['prompt']
+                    target_ns = lines[ns_ret_facts[ni]]['requested_rewrite']['target_new']['str']
+                    icl_ns.append(f'New Fact: {prompt_ns} {target_ns}\nPrompt: {prompt_ns} {target_ns}\n\n')
+                    t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, icl_ns, target,f'Prompt: {neighbor}', 'is')
+                # ns_flag = 0
+                # for sub in S:
+                #     if (sub + ' ' in neighbor) or (sub + '\'' in neighbor) or (sub + ',' in neighbor) or (
+                #             sub + '.' in neighbor):
+                #         t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, icl_examples, target,
+                #                                                f'Prompt: {neighbor}', 'is')
+                #         ns_flag = 1
+                #         break
+                # if ns_flag == 0:
+                #     ns_count += 1
+                #     t_logits, s_logits, s_loss = step_eval(teacher, student, tokenizer, [], target,
+                #                                            f'{neighbor}', 'ns')
+
+
                 # t_logits, s_logits, s_loss = step_eval(teacher2, student, tokenizer, icl_examples, target, f'Prompt: {neighbor}', 'ns')
                 soft_target = torch.nn.functional.log_softmax(t_logits / T, dim=-1)
                 soft_prob = torch.nn.functional.log_softmax(s_logits / T, dim=-1)
@@ -259,8 +284,9 @@ if __name__ == '__main__':
     # print("GPT-J teacher model loaded.")
 
     print("loading student model ...")
-    student = GPTJForCausalLM.from_pretrained("memit/models/GPT-J_memit_10000_0").to('cuda:1')
-    # student = GPTJForCausalLM.from_pretrained("./GPT-J_memit_10000_0").to('cuda:1')
+    # student = GPTJForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-J_memit_10000_0").to('cuda:1')
+    student = GPTJForCausalLM.from_pretrained("./GPT-J_memit_10000_0").to('cuda:1')
+    # student = GPTJForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-8000_test_8000_0").to('cuda:1')
 
     print("studnet model loaded.")
     print("set LoRA ...")
@@ -288,18 +314,23 @@ if __name__ == '__main__':
     lines = lines[:test_num]
     print("lines:", len(lines))
 
+    with open('./retrieved_facts.json', 'r') as f:     # load retrieved new facts for ps
+        n_facts = json.load(f)
+    with open('./ns_retrieved_facts.json', 'r') as f:     # load retrieved new facts for ns
+        ns_facts = json.load(f)
+
     epoches = 10
     T = 1.0
     soft_weight = 1e5
     label_weight = 0.5
 
     for epoch in range(epoches):
-        e_loss = distill(lines, teacher, student, optimizer, T=T, soft_weight=soft_weight, label_weight=label_weight)
-        if not osp.exists(f"./distill_modelsIKEbase/{epoch}"):
-            os.makedirs(f"./distill_modelsIKEbase/{epoch}")
-        student.save_pretrained(f"distill_modelsIKEbase/{epoch}")
+        e_loss = distill(lines,n_facts,ns_facts, teacher, student, optimizer, T=T, soft_weight=soft_weight, label_weight=label_weight)
+        if not osp.exists(f"./distill_modelsIKEbase8K/{epoch}"):
+            os.makedirs(f"./distill_modelsIKEbase8K/{epoch}")
+        student.save_pretrained(f"distill_modelsIKEbase8K/{epoch}")
         print(f"Epoche Loss: {e_loss}\n")
-        with open('Epoche_lossIKEbase.txt', mode='a') as src:
+        with open('Epoche_lossIKEbase8K.txt', mode='a') as src:
             src.write(f'epoch:{epoch} \t es_loss:{e_loss[0]} \t ps_loss:{e_loss[1]} \t ns_loss:{e_loss[2]}\n')
 
 
