@@ -23,11 +23,6 @@ hits = util.semantic_search(query_embeddings, corpus_embeddings, score_function=
 # print(hits)
 
 for i, hit in enumerate(hits):
-    # if i > 10:
-    #     break
-    # print("Query:", stored_sentences[i])
-    # print("\n")
-    # with open('corpus_idx_retrieval_score.txt', mode='a') as src:
     with open('corpus_idx_10k.txt', mode='a') as src:
         for k in range(len(hit)):
             # print(hit[k]['corpus_id']+2000*13, end=" ")
