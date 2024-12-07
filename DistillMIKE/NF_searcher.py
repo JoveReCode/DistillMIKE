@@ -45,9 +45,6 @@ for i,line in enumerate(lines):
             if i==j:             # matched itself
                 count +=1
             else:               # matched others (not uniquely matched, need retrieval)
-                # print(subject)
-                # print(paraphrases)
-                # print(nf)
                 fall += 1
                 ls.append(j)
                 dict.update({i:ls})
@@ -81,47 +78,37 @@ for i,line in enumerate(lines):
 
 print(n_list_dict,len(n_list_dict))
 print(ns_dict,len(ns_dict))
-# print(dict, len(dict))
 model = SentenceTransformer('all-MiniLM-L6-v2').to(device)
 print("mdoel_sentenceTransformer")
-
 
 
 #####################################   NS
 ns_score=[]
 ns_ret = {}
 for item in ns_dict:      #  for multi-matched facts, retrieve top fact
-    # print(item)
-
     facts = []
     line = lines[item]
     paraphrases = line['paraphrase_prompts']
     neighbors = []
     for ii in n_list_dict[item]:
-        # print(ii)
         neighbors.append(line['neighborhood_prompts'][ii])
     for ff in ns_dict[item]:
         ll = lines[ff]
         new_fact = ll['requested_rewrite']['prompt'].format(ll['requested_rewrite']['subject']) + ' ' + \
                    ll['requested_rewrite']['target_new']['str']
 
-        # new_fact = ll['requested_rewrite']['prompt'].format(ll['requested_rewrite']['subject'])
         facts.append(new_fact)
-    # print("embedding start")
     n_embeddings = model.encode(neighbors)
     f_embeddings = model.encode(facts)
-    # print("embedding end")
     corpus_embeddings = torch.tensor(f_embeddings)
     corpus_embeddings = corpus_embeddings.to('cuda')
     corpus_embeddings = util.normalize_embeddings(corpus_embeddings)
     query_embeddings = torch.tensor(n_embeddings)
     query_embeddings = query_embeddings.to('cuda')
-    # print(query_embeddings.shape)
     query_embeddings = util.normalize_embeddings(query_embeddings)
     hits = util.semantic_search(query_embeddings, corpus_embeddings, score_function=util.dot_score,
                                 top_k=1)
-    # print(dict[item])
-    # print(facts)
+
 
     ret = []
     for i in range(len(hits)):
@@ -132,7 +119,6 @@ for item in ns_dict:      #  for multi-matched facts, retrieve top fact
             idx = -1
         ret.append(ns_dict[item][idx])
         ns_ret.update({item:ret})
-    # print(hits[0][0]['corpus_id'])
 
 ns_all_facts = {}
 for ns_idx in n_list_dict:
@@ -149,10 +135,6 @@ for ns_idx in n_list_dict:
 for i in range(len(lines)):   # not matched/retrieved samples
     if i not in n_list_dict:
         ns_all_facts.update({i: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1]})
-# print(ns_all_facts)
-# ns_score.sort()
-# print(ns_score)
-# print(ns_ret)
 with open("ns_retrieved_facts.json", 'w') as jf:
     json.dump(ns_all_facts,jf)
 
@@ -176,24 +158,18 @@ for item in dict:      #  for multi-matched facts, retrieve top fact
         ll = lines[ff]
         new_fact = ll['requested_rewrite']['prompt'].format(ll['requested_rewrite']['subject']) + ' ' + \
                    ll['requested_rewrite']['target_new']['str']
-
-        # new_fact = ll['requested_rewrite']['prompt'].format(ll['requested_rewrite']['subject'])
         facts.append(new_fact)
-    # print("embedding start")
     p_embeddings = model.encode(paraphrases)
     f_embeddings = model.encode(facts)
-    # print("embedding end")
     corpus_embeddings = torch.tensor(f_embeddings)
     corpus_embeddings = corpus_embeddings.to('cuda')
     corpus_embeddings = util.normalize_embeddings(corpus_embeddings)
     query_embeddings = torch.tensor(p_embeddings)
     query_embeddings = query_embeddings.to('cuda')
-    # print(query_embeddings.shape)
     query_embeddings = util.normalize_embeddings(query_embeddings)
     hits = util.semantic_search(query_embeddings, corpus_embeddings, score_function=util.dot_score,
                                 top_k=1)
-    # print(dict[item])
-    # print(facts)
+
     score_list.append(float(hits[0][0]['score']))
     score_list.append(float(hits[1][0]['score']))
     if hits[0][0]['score'] >= threshold:
@@ -206,34 +182,12 @@ for item in dict:      #  for multi-matched facts, retrieve top fact
         idx2 = -1
     ret = [dict[item][idx1],dict[item][idx2]]
     ret_dict.update({item:ret})
-    # print(hits[0][0]['corpus_id'])
-    # if hits[0][0]['corpus_id'] != 0:         #  for the 1st paraphrase
-    #     c1+=1
-    #     print(p1)
-    #     print(facts[0])
-    #     print(facts[hits[0][0]['corpus_id']])
-    # if hits[1][0]['corpus_id'] != 0:        # second
-    #     c2+=1
-    #     print(p2)
-    #     print(facts[0])
-    #     print(facts[hits[1][0]['corpus_id']])
-    # print(hits)
 
-# print(ret_dict)
-# print(score_list)
-# score_list.sort()
-# print(score_list)
 all_facts = ret_dict
 for i in range(len(lines)):
     if i not in ret_dict:
         all_facts.update({i:[i,i]})       # for * uniquely matched itself
 
-# print(all_facts)
 with open("retrieved_facts.json", 'w') as jf:
     json.dump(all_facts,jf)
 
-# print(count)
-# print(fall)
-#
-# print(c1)
-# print(c2)
