@@ -63,7 +63,7 @@ if __name__ == '__main__':
     print(model_name)
     # load distilled model (student)
     # model = AutoPeftModelForCausalLM.from_pretrained("distill_models_neox_MIKE/10",load_in_8bit=True,device_map="cuda:0") 
-    model = AutoPeftModelForCausalLM.from_pretrained("distill_modelsIKEbaseE/checkpoint_10", device_map="cuda:0")
+    model = AutoPeftModelForCausalLM.from_pretrained("distill_models/10", device_map="cuda:0")
     # model = GPTJForCausalLM.from_pretrained(model_name).to(device)
     print("model loaded.")
 
