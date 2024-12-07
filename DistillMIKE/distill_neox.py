@@ -15,7 +15,7 @@ from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_int8_tr
 scaler = torch.cuda.amp.GradScaler()
 
 # model_name = 'EleutherAI/gpt-j-6B'
-model_name = "/raid2/qiaosb/memit/models/GPT-NeoX_10000_10000_0"
+model_name = "/home/user/memit/models/GPT-NeoX_10000_10000_0"
 dataset_name = './multi_counterfact_ori.json'
 test_num = 10000
 overflow = []
@@ -68,7 +68,6 @@ def step_eval(teacher, student, tokenizer, icl_examples, target, x, tag):
     prompt_encodings = tokenizer(' ' + f'{x} {target}', return_tensors='pt')
     student_ids = prompt_encodings['input_ids'].to(student.device)
     if tag == 'ns':    # GPT-J teacher for NS
-        # print("ns")
         teacher_ids = prompt_encodings['input_ids'].to(teacher.device)
     else:       # MEMIT teacher for ES,PS
         if encodings['input_ids'].size(1) < 2048:
@@ -84,32 +83,16 @@ def step_eval(teacher, student, tokenizer, icl_examples, target, x, tag):
     student_target_ids = student_ids.clone().to(student.device)
     student_target_ids[:, :-tgt_len] = -100
     with torch.no_grad():
-        # print(teacher_ids)
-        # print(target_ids)
+
         with torch.cuda.amp.autocast():
             teacher_outputs = teacher(teacher_ids, labels = target_ids)
-            # print(teacher_outputs.logits)
             teacher_logits = teacher_outputs.logits
-        # print(student_ids.device, student_target_ids.device)
     with torch.cuda.amp.autocast():
         student_outputs = student(student_ids, labels = student_target_ids)
-        # print(student_outputs.logits)
         student_logits = student_outputs.logits
         student_loss = student_outputs.loss
-    # print(teacher_logits.shape)
-    # print(student_logits.shape)
-    # s_len = student_logits.size(1)
-    # t_len = teacher_logits.size(1)
-    # if s_len < t_len:
-    #     teacher_logits = teacher_logits[:,-s_len:,:]
-    # else:
-    #     student_logits = student_logits[:,-t_len:,:]
     teacher_logits = teacher_logits[:, -3:, :]
     student_logits = student_logits[:, -3:, :]
-    # print(teacher_trunc_logits.shape)
-    # print(teacher_logits)
-    # print(student_logits)
-    # print(student_loss)
 
     return teacher_logits, student_logits, student_loss
 
@@ -163,25 +146,15 @@ def distill(lines,n_facts, ns_facts, teacher1, teacher2, student, optimizer, T, 
             t_logits, s_logits, s_loss = step_eval(teacher1, student, tokenizer, icl_examples, target, f'Prompt: {prompt}', 'es')
             soft_target = torch.nn.functional.log_softmax( t_logits / T, dim=-1 )
             soft_prob = torch.nn.functional.log_softmax( s_logits / T, dim=-1)
-
-            # print(soft_target)
-            # print(soft_prob)
-
             soft_target_clone = soft_target.clone().to(soft_prob.device)
-
             soft_target_loss = kl_div_loss(soft_prob, soft_target_clone)
-            # print(soft_target_loss)
 
             label_loss = s_loss
             # loss = soft_weight * soft_target_loss + label_weight * label_loss    #   with label_loss
             loss = soft_weight * soft_target_loss        # without label_loss
-            # print(loss, soft_target_loss, label_loss)
             optimizer.zero_grad()
             loss.backward()
-            # scaler.scale(loss).backward()
             optimizer.step()
-            # scaler.step(optimizer)
-            # scaler.update()
             es_loss += loss.item()
             losses[0] = es_loss / ((i+1)*2)
 
@@ -211,10 +184,7 @@ def distill(lines,n_facts, ns_facts, teacher1, teacher2, student, optimizer, T, 
                 loss = soft_weight * soft_target_loss  # without label_loss
                 optimizer.zero_grad()
                 loss.backward()
-                # scaler.scale(loss).backward()
-                # scaler.step(optimizer)
                 optimizer.step()
-                # scaler.update()
                 ps_loss += loss.item()
             losses[1] = ps_loss / ((i+1)*2*2)
 
@@ -234,21 +204,6 @@ def distill(lines,n_facts, ns_facts, teacher1, teacher2, student, optimizer, T, 
                     target_ns = lines[ns_ret_facts[ni]]['requested_rewrite']['target_new']['str']
                     icl_ns.append(f'New Fact: {prompt_ns} {target_ns}\nPrompt: {prompt_ns} {target_ns}\n\n')
                     t_logits, s_logits, s_loss = step_eval(teacher2, student, tokenizer, icl_ns, target,f'Prompt: {neighbor}', 'is')
-
-                # ns_flag = 0
-                # for sub in S:
-                #     if (sub + ' ' in neighbor) or (sub + '\'' in neighbor) or (sub + ',' in neighbor) or (
-                #             sub + '.' in neighbor) or (sub + '?' in neighbor) or (sub + 's' in neighbor):
-                #         t_logits, s_logits, s_loss = step_eval(teacher1, student, tokenizer, icl_examples, target,
-                #                                                f'Prompt: {neighbor}', 'is')     #  maybe should not distill here
-                #         ns_flag = 1
-                #         break
-                # if ns_flag == 0:
-                #     ns_count += 1
-                #     t_logits, s_logits, s_loss = step_eval(teacher2, student, tokenizer, [], target, f'{neighbor}', 'ns')
-
-
-
                 # t_logits, s_logits, s_loss = step_eval(teacher2, student, tokenizer, icl_examples, target, f'Prompt: {neighbor}', 'ns')
                 soft_target = torch.nn.functional.log_softmax(t_logits / T, dim=-1)
                 soft_prob = torch.nn.functional.log_softmax(s_logits / T, dim=-1)
@@ -287,11 +242,9 @@ if __name__ == '__main__':
 
 
     print("loading MEMIT teacher model ...")
-    # teacher1 = GPTJForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0")
-    # teacher1 = AutoModelForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0",
+    # teacher1 = GPTJForCausalLM.from_pretrained("/home/user/memit/models/GPT-NeoX_10000_10000_0")
+    # teacher1 = AutoModelForCausalLM.from_pretrained("/home/user/memit/models/GPT-NeoX_10000_10000_0",
     #                                              torch_dtype=torch.float16, device_map="cuda:0")
-    # teacher1 = AutoModelForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0",
-    #                                              load_in_8bit=True, device_map="cuda:0")
     teacher1 = AutoModelForCausalLM.from_pretrained('EleutherAI/gpt-neox-20b', load_in_8bit=True, device_map="cuda:0")
 
 
@@ -305,9 +258,9 @@ if __name__ == '__main__':
     print("GPT-J teacher model loaded.")
 
     print("loading student model ...")
-    # student = AutoModelForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0",
+    # student = AutoModelForCausalLM.from_pretrained("/home/user/memit/models/GPT-NeoX_10000_10000_0",
     #                                              torch_dtype=torch.float16, device_map="cuda:2")
-    student = AutoModelForCausalLM.from_pretrained("/data2/qiaosb/memit/models/GPT-NeoX_10000_10000_0",
+    student = AutoModelForCausalLM.from_pretrained("/home/user/memit/models/GPT-NeoX_10000_10000_0",
                                                    load_in_8bit=True, device_map="cuda:2")
 
     student = prepare_model_for_int8_training(student)
@@ -317,12 +270,6 @@ if __name__ == '__main__':
         if param.ndim == 1:
             # cast the small parameters (e.g. layernorm) to fp32 for stability
             param.data = param.data.to(torch.float32)
-
-
-
-    # class CastOutputToFloat(torch.nn.Sequential):
-    #     def forward(self, x): return super().forward(x).to(torch.float32)
-    # student.lm_head = CastOutputToFloat(student.lm_head)
 
     print("studnet model loaded.")
     print("set LoRA ...")
